@@ -1,0 +1,230 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Network | Basic usage</title>
+
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis-network.min.css" rel="stylesheet" type="text/css" />
+</head>
+
+<body>
+
+    <body aurelia-app>
+        <h1>Loading...</h1>
+        <div id="mynetwork" style="height:400px"></div>
+        <button onclick="message()"> <u>O</u>K </button>
+    </body>
+
+</html>
+
+
+<script>
+    DATA = {};
+    var ws = new WebSocket('ws://localhost:40510');
+    // event emmited when connected
+    ws.onopen = function() {
+        console.log('websocket is connected ...')
+            // sending a send event to websocket server
+        ws.send('connected')
+    }
+
+    // event emmited when receiving message 
+    ws.onmessage = function(ev) {
+        // create a network
+        var container = document.getElementById('mynetwork');
+
+        var options = {
+            interaction: {
+                hover: true
+            },
+            manipulation: {
+                enabled: true
+            },
+            layout: {
+                randomSeed: 2
+            }
+        };
+
+        var network = importNetwork(container, ev.data, options);
+
+        network.on("click", params => {
+            params.event = "[original event]";
+            if (this.eventSpan) this.eventSpan.innerHTML = '<h2>Click event:</h2>' + JSON.stringify(params, null, 4);
+            console.log('click event, getNodeAt returns: ' + network.getNodeAt(params.pointer.DOM));
+        });
+        network.on("doubleClick", params => {
+            params.event = "[original event]";
+            if (this.eventSpan) this.eventSpan.innerHTML = '<h2>doubleClick event:</h2>' + JSON.stringify(params, null, 4);
+            var nodes = network.getSelectedNodes();
+            for (var i = 0; i < nodes.length; i++) {
+                var node = network.body.nodes[nodes[i]];
+                if (node.options.shape === 'ellipse')
+                    node.setOptions({
+                        shape: 'hexagon',
+                        size: 35
+                    });
+                else
+                    node.setOptions({
+                        shape: 'ellipse'
+                    });
+            }
+        });
+        container.addEventListener('contextmenu', function(e) {
+            if (this.eventSpan) this.eventSpan.innerHTML = '<h2>oncontext (right click) event:</h2>' + JSON.stringify(params, null, 4);
+            e.preventDefault()
+            console.log('contexmenu event:', e)
+
+        }, false);
+        network.on("dragStart", params => {
+            // There's no point in displaying this event on screen, it gets immediately overwritten
+            params.event = "[original event]";
+            console.log('dragStart Event:', params);
+            console.log('dragStart event, getNodeAt returns: ' + network.getNodeAt(params.pointer.DOM));
+        });
+        network.on("dragging", params => {
+            params.event = "[original event]";
+            if (this.eventSpan) this.eventSpan.innerHTML = '<h2>dragging event:</h2>' + JSON.stringify(params, null, 4);
+        });
+
+        function addConnections(elem, index) {
+            // need to replace this with a tree of the network, then get child direct children of the element
+            elem.connections = network.getConnectedNodes(index);
+        }
+
+        function objectToArray(obj) {
+            return Object.keys(obj).map(function(key) {
+                obj[key].id = key;
+                return obj[key];
+            });
+        }
+
+        function exportNetwork() {
+            var nodes = objectToArray(network.getPositions());
+
+            nodes.forEach(addConnections);
+
+            // pretty print node data
+            var exportValue = JSON.stringify(nodes, undefined, 2);
+
+            ws.send(exportValue);
+        }
+
+        function importNetwork(container, valueToImport, options) {
+            var inputValue = valueToImport;
+            var inputData = JSON.parse(inputValue);
+
+            var data = {
+                nodes: getNodeData(inputData),
+                edges: getEdgeData(inputData)
+            }
+
+            network = new vis.Network(container, data, options);
+
+            return network;
+        }
+
+        function getNodeData(data) {
+            var networkNodes = [];
+
+            data.forEach(function(elem, index, array) {
+                networkNodes.push({
+                    id: elem.id,
+                    label: elem.id,
+                    x: elem.x,
+                    y: elem.y
+                });
+            });
+
+            return new vis.DataSet(networkNodes);
+        }
+
+        function getEdgeData(data) {
+            var networkEdges = [];
+
+            data.forEach(function(node) {
+                // add the connection
+                node.connections.forEach(function(connId, cIndex, conns) {
+                    networkEdges.push({
+                        from: node.id,
+                        to: connId
+                    });
+                    let cNode = getNodeById(data, connId);
+
+                    var elementConnections = cNode.connections;
+
+                    // remove the connection from the other node to prevent duplicate connections
+                    var duplicateIndex = elementConnections.findIndex(function(connection) {
+                        return connection == node.id; // double equals since id can be numeric or string
+                    });
+
+
+                    if (duplicateIndex != -1) {
+                        elementConnections.splice(duplicateIndex, 1);
+                    };
+                });
+            });
+
+            return new vis.DataSet(networkEdges);
+        }
+
+        function getNodeById(data, id) {
+            for (var n = 0; n < data.length; n++) {
+                if (data[n].id == id) { // double equals since id can be numeric or string
+                    return data[n];
+                }
+            };
+
+            throw 'Can not find id \'' + id + '\' in data';
+        }
+
+        network.on("dragEnd", params => {
+            params.event = "[original event]";
+            if (this.eventSpan) this.eventSpan.innerHTML = '<h2>dragEnd event:</h2>' + JSON.stringify(params, null, 4);
+            console.log('dragEnd Event:', params);
+            console.log('dragEnd event, getNodeAt returns: ' + network.getNodeAt(params.pointer.DOM));
+            exportNetwork()
+        });
+        network.on("zoom", params => {
+            if (this.eventSpan) this.eventSpan.innerHTML = '<h2>zoom event:</h2>' + JSON.stringify(params, null, 4);
+        });
+        network.on("showPopup", params => {
+            if (this.eventSpan) this.eventSpan.innerHTML = '<h2>showPopup event: </h2>' + JSON.stringify(params, null, 4);
+        });
+        network.on("hidePopup", () => {
+            console.log('hidePopup Event');
+        });
+        network.on("select", params => {
+            console.log('select Event:', params);
+        });
+        network.on("selectNode", params => {
+            console.log('selectNode Event:', params);
+        });
+        network.on("selectEdge", params => {
+            console.log('selectEdge Event:', params);
+        });
+        network.on("deselectNode", params => {
+            console.log('deselectNode Event:', params);
+        });
+        network.on("deselectEdge", params => {
+            console.log('deselectEdge Event:', params);
+        });
+        // network.on("hoverNode", params => {
+
+        //     console.log('hoverNode Event:', params);
+        // });
+        // network.on("hoverEdge", params => {
+        //     console.log('hoverEdge Event:', params);
+        // });
+        network.on("blurNode", params => {
+            console.log('blurNode Event:', params);
+        });
+        network.on("blurEdge", params => {
+            console.log('blurEdge Event:', params);
+        });
+    }
+
+    message = function() {
+        ws.send(JSON.stringify(DATA));
+    }
+</script>
